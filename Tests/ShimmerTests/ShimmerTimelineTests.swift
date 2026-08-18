@@ -156,9 +156,9 @@ final class ShimmerTimelineTests: XCTestCase {
     layer.start()
 
     let mask = try XCTUnwrap(layer.contentLayer.mask as? CAGradientLayer)
-    let slide = try observableAnimation(keyPath: "position.x", in: mask)
+    let slide = try observableAnimation(keyPath: "position.y", in: mask)
     XCTAssertEqual(try centerAlpha(of: mask), 0.3, accuracy: 0.000_1)
-    XCTAssertEqual(slide.duration, 0.35, accuracy: 0.000_1)
+    XCTAssertEqual(slide.duration, 0.29, accuracy: 0.000_1)
     XCTAssertEqual(layer.configuration.direction, .bottomToTop)
   }
 

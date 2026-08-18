@@ -33,6 +33,9 @@ public final class ShimmeringView: UIView {
 
   public func start(at startTime: ShimmerStartTime = .now) {
     shimmerEngine.start(at: startTime)
+    if window == nil {
+      shimmerEngine.pause()
+    }
   }
 
   public func stop(_ mode: ShimmerStopMode = .smooth) {
@@ -43,5 +46,14 @@ public final class ShimmeringView: UIView {
     super.layoutSubviews()
     contentView.frame = bounds
     shimmerEngine.layoutDidChange()
+  }
+
+  public override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if window == nil {
+      shimmerEngine.pause()
+    } else {
+      shimmerEngine.resume()
+    }
   }
 }

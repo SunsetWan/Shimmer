@@ -1,4 +1,4 @@
-import QuartzCore
+import UIKit
 
 @MainActor
 public final class ShimmeringLayer: CALayer {
@@ -10,6 +10,7 @@ public final class ShimmeringLayer: CALayer {
   }()
 
   private lazy var shimmerEngine = ShimmerEngine(contentLayer: contentLayer)
+  private var geometryDisplayLink: CADisplayLink?
 
   public var configuration: ShimmerConfiguration {
     get { shimmerEngine.configuration }
@@ -33,14 +34,56 @@ public final class ShimmeringLayer: CALayer {
   }
 
   public func start(at startTime: ShimmerStartTime = .now) {
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
-    contentLayer.frame = bounds
-    CATransaction.commit()
+    synchronizeContentLayout()
     shimmerEngine.start(at: startTime)
+    startGeometryObservation()
   }
 
   public func stop(_ mode: ShimmerStopMode = .smooth) {
     shimmerEngine.stop(mode)
+    stopGeometryObservation()
+  }
+
+  private func startGeometryObservation() {
+    guard geometryDisplayLink == nil else { return }
+    let target = ShimmeringLayerDisplayLinkTarget(layer: self)
+    let displayLink = CADisplayLink(
+      target: target,
+      selector: #selector(ShimmeringLayerDisplayLinkTarget.tick(_:))
+    )
+    displayLink.add(to: .main, forMode: .common)
+    geometryDisplayLink = displayLink
+  }
+
+  private func stopGeometryObservation() {
+    geometryDisplayLink?.invalidate()
+    geometryDisplayLink = nil
+  }
+
+  fileprivate func synchronizeContentLayout() {
+    if contentLayer.frame != bounds {
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      contentLayer.frame = bounds
+      CATransaction.commit()
+    }
+    shimmerEngine.layoutDidChange()
+  }
+}
+
+@MainActor
+private final class ShimmeringLayerDisplayLinkTarget: NSObject {
+  weak var layer: ShimmeringLayer?
+
+  init(layer: ShimmeringLayer) {
+    self.layer = layer
+  }
+
+  @objc func tick(_ displayLink: CADisplayLink) {
+    guard let layer else {
+      displayLink.invalidate()
+      return
+    }
+    layer.synchronizeContentLayout()
   }
 }

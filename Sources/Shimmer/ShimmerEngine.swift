@@ -3,28 +3,30 @@ import UIKit
 
 @MainActor
 final class ShimmerEngine {
-  private static let slideAnimationKey = "com.sunset.shimmer.slide"
   private static let fadeAnimationKey = "com.sunset.shimmer.fade"
+  private static let slideAnimationKey = "com.sunset.shimmer.slide"
 
   let contentLayer: CALayer
 
   private(set) var isShimmering = false
   private var activeConfiguration: ShimmerConfiguration
+  private var activeGeometry: ShimmerGeometry?
   private var animationDuration: CFTimeInterval?
   private var animationStartTime: CFTimeInterval?
   private var fadeLayer: CALayer?
+  private var installedBounds: CGRect?
+  private var isPaused = false
   private var maskLayer: CAGradientLayer?
   private var requestedConfiguration: ShimmerConfiguration
   private var transitionDelegate: ShimmerAnimationDelegate?
   private var transitionGeneration = 0
-  private var travelDistance: CGFloat?
 
   var configuration: ShimmerConfiguration {
     get { requestedConfiguration }
     set {
       guard newValue != requestedConfiguration else { return }
       requestedConfiguration = newValue
-      if isShimmering {
+      if isShimmering, maskLayer != nil {
         scheduleConfigurationTransitionIfNeeded()
       } else {
         activeConfiguration = newValue
@@ -45,8 +47,10 @@ final class ShimmerEngine {
     guard !isShimmering else { return }
     cancelPendingTransition()
     removeMaskImmediately()
+    isPaused = false
     isShimmering = true
     activeConfiguration = requestedConfiguration
+    animationStartTime = startTime.mediaTime
     installMaskAndAnimationIfPossible(startTime: startTime, includeBeginFade: true)
   }
 
@@ -55,20 +59,50 @@ final class ShimmerEngine {
     case .smooth:
       guard isShimmering else { return }
       isShimmering = false
+      if isPaused {
+        resumeMaskTimeline()
+        isPaused = false
+      }
       cancelPendingTransition()
       scheduleSmoothStopIfPossible()
 
     case .immediate:
       guard isShimmering || maskLayer != nil else { return }
       isShimmering = false
+      isPaused = false
       cancelPendingTransition()
       activeConfiguration = requestedConfiguration
       removeMaskImmediately()
+      animationStartTime = nil
     }
+  }
+
+  func pause() {
+    guard isShimmering, !isPaused else { return }
+    isPaused = true
+    pauseMaskTimeline()
+  }
+
+  func resume() {
+    guard isShimmering, isPaused else { return }
+    isPaused = false
+    resumeMaskTimeline()
+    layoutDidChange()
   }
 
   func layoutDidChange() {
     guard isShimmering, let animationStartTime else { return }
+    let bounds = contentLayer.bounds
+
+    guard bounds.width > 0, bounds.height > 0 else {
+      if maskLayer != nil {
+        cancelPendingTransition()
+        removeMaskImmediately()
+      }
+      return
+    }
+
+    guard maskLayer == nil || installedBounds != bounds else { return }
     cancelPendingTransition()
     installMaskAndAnimationIfPossible(
       startTime: ShimmerStartTime(mediaTime: animationStartTime),
@@ -83,35 +117,22 @@ final class ShimmerEngine {
     startTime: ShimmerStartTime,
     includeBeginFade: Bool
   ) {
+    animationStartTime = startTime.mediaTime
     let bounds = contentLayer.bounds
     guard bounds.width > 0, bounds.height > 0 else { return }
 
     removeMaskImmediately()
 
     let configuration = activeConfiguration
-    let length = bounds.width
-    let extraDistance = length + configuration.speed * configuration.pauseDuration
-    let fullMaskLength = length * 3 + extraDistance
-    let travelDistance = length * 2 + extraDistance
+    let geometry = makeGeometry(bounds: bounds, configuration: configuration)
     let highlightOutsideLength = (1 - configuration.highlightLength) / 2
 
     let maskLayer = CAGradientLayer()
     maskLayer.anchorPoint = .zero
-    maskLayer.bounds = CGRect(
-      x: 0,
-      y: 0,
-      width: fullMaskLength,
-      height: bounds.height
-    )
-    maskLayer.position = CGPoint(x: -travelDistance, y: 0)
-    maskLayer.startPoint = CGPoint(
-      x: (length + extraDistance) / fullMaskLength,
-      y: 0.5
-    )
-    maskLayer.endPoint = CGPoint(
-      x: travelDistance / fullMaskLength,
-      y: 0.5
-    )
+    maskLayer.bounds = geometry.maskBounds
+    maskLayer.position = geometry.initialPosition
+    maskLayer.startPoint = geometry.gradientStartPoint
+    maskLayer.endPoint = geometry.gradientEndPoint
     maskLayer.locations = [
       NSNumber(value: highlightOutsideLength),
       0.5,
@@ -129,9 +150,10 @@ final class ShimmerEngine {
     fadeLayer.opacity = 0
     maskLayer.addSublayer(fadeLayer)
 
-    let animationDuration = (length / configuration.speed) + configuration.pauseDuration
+    let animationDuration =
+      (geometry.contentLength / configuration.speed) + configuration.pauseDuration
     let slide = makeSlideAnimation(
-      travelDistance: travelDistance,
+      geometry: geometry,
       duration: animationDuration,
       beginTime: startTime.mediaTime,
       repeats: true
@@ -154,11 +176,92 @@ final class ShimmerEngine {
     CATransaction.commit()
     maskLayer.add(slide, forKey: Self.slideAnimationKey)
 
+    activeGeometry = geometry
     self.animationDuration = animationDuration
-    animationStartTime = startTime.mediaTime
     self.fadeLayer = fadeLayer
+    installedBounds = bounds
     self.maskLayer = maskLayer
-    self.travelDistance = travelDistance
+
+    if isPaused {
+      pauseMaskTimeline()
+    }
+  }
+
+  private func makeGeometry(
+    bounds: CGRect,
+    configuration: ShimmerConfiguration
+  ) -> ShimmerGeometry {
+    let isHorizontal: Bool
+    switch configuration.direction {
+    case .leftToRight, .rightToLeft:
+      isHorizontal = true
+    case .topToBottom, .bottomToTop:
+      isHorizontal = false
+    }
+
+    let contentLength = isHorizontal ? bounds.width : bounds.height
+    let extraDistance = contentLength + configuration.speed * configuration.pauseDuration
+    let fullMaskLength = contentLength * 3 + extraDistance
+    let travelDistance = contentLength * 2 + extraDistance
+    let gradientStart = (contentLength + extraDistance) / fullMaskLength
+    let gradientEnd = travelDistance / fullMaskLength
+
+    let axisKeyPath: String
+    let fromValue: CGFloat
+    let toValue: CGFloat
+    let initialPosition: CGPoint
+    let maskBounds: CGRect
+    let gradientStartPoint: CGPoint
+    let gradientEndPoint: CGPoint
+
+    switch configuration.direction {
+    case .leftToRight:
+      axisKeyPath = "position.x"
+      fromValue = -travelDistance
+      toValue = 0
+      initialPosition = CGPoint(x: fromValue, y: 0)
+      maskBounds = CGRect(x: 0, y: 0, width: fullMaskLength, height: bounds.height)
+      gradientStartPoint = CGPoint(x: gradientStart, y: 0.5)
+      gradientEndPoint = CGPoint(x: gradientEnd, y: 0.5)
+
+    case .rightToLeft:
+      axisKeyPath = "position.x"
+      fromValue = 0
+      toValue = -travelDistance
+      initialPosition = CGPoint(x: fromValue, y: 0)
+      maskBounds = CGRect(x: 0, y: 0, width: fullMaskLength, height: bounds.height)
+      gradientStartPoint = CGPoint(x: gradientStart, y: 0.5)
+      gradientEndPoint = CGPoint(x: gradientEnd, y: 0.5)
+
+    case .topToBottom:
+      axisKeyPath = "position.y"
+      fromValue = -travelDistance
+      toValue = 0
+      initialPosition = CGPoint(x: 0, y: fromValue)
+      maskBounds = CGRect(x: 0, y: 0, width: bounds.width, height: fullMaskLength)
+      gradientStartPoint = CGPoint(x: 0.5, y: gradientStart)
+      gradientEndPoint = CGPoint(x: 0.5, y: gradientEnd)
+
+    case .bottomToTop:
+      axisKeyPath = "position.y"
+      fromValue = 0
+      toValue = -travelDistance
+      initialPosition = CGPoint(x: 0, y: fromValue)
+      maskBounds = CGRect(x: 0, y: 0, width: bounds.width, height: fullMaskLength)
+      gradientStartPoint = CGPoint(x: 0.5, y: gradientStart)
+      gradientEndPoint = CGPoint(x: 0.5, y: gradientEnd)
+    }
+
+    return ShimmerGeometry(
+      axisKeyPath: axisKeyPath,
+      contentLength: contentLength,
+      fromValue: fromValue,
+      gradientEndPoint: gradientEndPoint,
+      gradientStartPoint: gradientStartPoint,
+      initialPosition: initialPosition,
+      maskBounds: maskBounds,
+      toValue: toValue
+    )
   }
 
   private func scheduleConfigurationTransitionIfNeeded() {
@@ -166,7 +269,7 @@ final class ShimmerEngine {
       let maskLayer,
       let animationDuration,
       let animationStartTime,
-      let travelDistance
+      let activeGeometry
     else { return }
 
     let boundary = nextSweepBoundary(
@@ -175,7 +278,7 @@ final class ShimmerEngine {
       duration: animationDuration
     )
     let finishSlide = makeSlideAnimation(
-      travelDistance: travelDistance,
+      geometry: activeGeometry,
       duration: animationDuration,
       beginTime: boundary - animationDuration,
       repeats: false
@@ -205,10 +308,11 @@ final class ShimmerEngine {
       let fadeLayer,
       let animationDuration,
       let animationStartTime,
-      let travelDistance
+      let activeGeometry
     else {
       activeConfiguration = requestedConfiguration
       removeMaskImmediately()
+      self.animationStartTime = nil
       return
     }
 
@@ -218,7 +322,7 @@ final class ShimmerEngine {
       duration: animationDuration
     )
     let finishSlide = makeSlideAnimation(
-      travelDistance: travelDistance,
+      geometry: activeGeometry,
       duration: animationDuration,
       beginTime: boundary - animationDuration,
       repeats: false
@@ -244,6 +348,7 @@ final class ShimmerEngine {
       self.transitionDelegate = nil
       self.activeConfiguration = self.requestedConfiguration
       self.removeMaskImmediately()
+      self.animationStartTime = nil
     }
     self.transitionDelegate = transitionDelegate
     endFade.delegate = transitionDelegate
@@ -256,14 +361,14 @@ final class ShimmerEngine {
   }
 
   private func makeSlideAnimation(
-    travelDistance: CGFloat,
+    geometry: ShimmerGeometry,
     duration: CFTimeInterval,
     beginTime: CFTimeInterval,
     repeats: Bool
   ) -> CABasicAnimation {
-    let slide = CABasicAnimation(keyPath: "position.x")
-    slide.fromValue = -travelDistance
-    slide.toValue = 0
+    let slide = CABasicAnimation(keyPath: geometry.axisKeyPath)
+    slide.fromValue = geometry.fromValue
+    slide.toValue = geometry.toValue
     slide.duration = duration
     slide.beginTime = beginTime
     slide.repeatCount = repeats ? .infinity : 0
@@ -283,6 +388,20 @@ final class ShimmerEngine {
     return startTime + (completedSweeps + 1) * duration
   }
 
+  private func pauseMaskTimeline() {
+    guard let maskLayer, maskLayer.speed != 0 else { return }
+    let pauseTime = maskLayer.convertTime(CACurrentMediaTime(), from: nil)
+    maskLayer.speed = 0
+    maskLayer.timeOffset = pauseTime
+  }
+
+  private func resumeMaskTimeline() {
+    guard let maskLayer, maskLayer.speed == 0 else { return }
+    maskLayer.speed = 1
+    maskLayer.timeOffset = 0
+    maskLayer.beginTime = 0
+  }
+
   private func cancelPendingTransition() {
     transitionGeneration += 1
     transitionDelegate = nil
@@ -297,12 +416,23 @@ final class ShimmerEngine {
       contentLayer.mask = nil
     }
     CATransaction.commit()
+    activeGeometry = nil
     animationDuration = nil
-    animationStartTime = nil
     fadeLayer = nil
+    installedBounds = nil
     maskLayer = nil
-    travelDistance = nil
   }
+}
+
+private struct ShimmerGeometry {
+  let axisKeyPath: String
+  let contentLength: CGFloat
+  let fromValue: CGFloat
+  let gradientEndPoint: CGPoint
+  let gradientStartPoint: CGPoint
+  let initialPosition: CGPoint
+  let maskBounds: CGRect
+  let toValue: CGFloat
 }
 
 private final class ShimmerAnimationDelegate: NSObject, CAAnimationDelegate {
