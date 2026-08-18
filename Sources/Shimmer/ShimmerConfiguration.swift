@@ -10,6 +10,13 @@ public enum ShimmerConfigurationParameter: String, Sendable {
   case endFadeDuration
 }
 
+public enum ShimmerDirection: Equatable, Sendable {
+  case leftToRight
+  case rightToLeft
+  case topToBottom
+  case bottomToTop
+}
+
 public enum ShimmerConfigurationError: Error, Equatable, Sendable {
   case notFinite(ShimmerConfigurationParameter)
   case mustBePositive(ShimmerConfigurationParameter)
@@ -25,7 +32,8 @@ public struct ShimmerConfiguration: Equatable, Sendable {
     baseOpacity: 1,
     animationOpacity: 0.5,
     beginFadeDuration: 0.1,
-    endFadeDuration: 0.3
+    endFadeDuration: 0.3,
+    direction: .leftToRight
   )
 
   public let speed: CGFloat
@@ -35,6 +43,7 @@ public struct ShimmerConfiguration: Equatable, Sendable {
   public let animationOpacity: Float
   public let beginFadeDuration: CFTimeInterval
   public let endFadeDuration: CFTimeInterval
+  public let direction: ShimmerDirection
 
   public init(
     speed: CGFloat,
@@ -43,7 +52,8 @@ public struct ShimmerConfiguration: Equatable, Sendable {
     baseOpacity: Float,
     animationOpacity: Float,
     beginFadeDuration: CFTimeInterval,
-    endFadeDuration: CFTimeInterval
+    endFadeDuration: CFTimeInterval,
+    direction: ShimmerDirection
   ) throws {
     try Self.validateFinite(speed, parameter: .speed)
     guard speed > 0 else {
@@ -64,7 +74,8 @@ public struct ShimmerConfiguration: Equatable, Sendable {
       baseOpacity: baseOpacity,
       animationOpacity: animationOpacity,
       beginFadeDuration: beginFadeDuration,
-      endFadeDuration: endFadeDuration
+      endFadeDuration: endFadeDuration,
+      direction: direction
     )
   }
 
@@ -75,7 +86,8 @@ public struct ShimmerConfiguration: Equatable, Sendable {
     baseOpacity: Float,
     animationOpacity: Float,
     beginFadeDuration: CFTimeInterval,
-    endFadeDuration: CFTimeInterval
+    endFadeDuration: CFTimeInterval,
+    direction: ShimmerDirection
   ) {
     self.speed = speed
     self.pauseDuration = pauseDuration
@@ -84,6 +96,7 @@ public struct ShimmerConfiguration: Equatable, Sendable {
     self.animationOpacity = animationOpacity
     self.beginFadeDuration = beginFadeDuration
     self.endFadeDuration = endFadeDuration
+    self.direction = direction
   }
 
   private static func validateFinite<T: BinaryFloatingPoint>(

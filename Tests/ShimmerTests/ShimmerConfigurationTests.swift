@@ -14,10 +14,14 @@ final class ShimmerConfigurationTests: XCTestCase {
     XCTAssertEqual(configuration.animationOpacity, 0.5)
     XCTAssertEqual(configuration.beginFadeDuration, 0.1)
     XCTAssertEqual(configuration.endFadeDuration, 0.3)
+    XCTAssertEqual(configuration.direction, .leftToRight)
   }
 
   func testConfigurationIsSendable() {
     requireSendable(ShimmerConfiguration.self)
+    requireSendable(ShimmerDirection.self)
+    requireSendable(ShimmerStartTime.self)
+    requireSendable(ShimmerStopMode.self)
   }
 
   func testRejectsInvalidValuesWithTypedErrors() throws {
@@ -70,7 +74,8 @@ final class ShimmerConfigurationTests: XCTestCase {
     baseOpacity: Float = 1,
     animationOpacity: Float = 0.5,
     beginFadeDuration: CFTimeInterval = 0.1,
-    endFadeDuration: CFTimeInterval = 0.3
+    endFadeDuration: CFTimeInterval = 0.3,
+    direction: ShimmerDirection = .leftToRight
   ) throws -> ShimmerConfiguration {
     try ShimmerConfiguration(
       speed: speed,
@@ -79,7 +84,8 @@ final class ShimmerConfigurationTests: XCTestCase {
       baseOpacity: baseOpacity,
       animationOpacity: animationOpacity,
       beginFadeDuration: beginFadeDuration,
-      endFadeDuration: endFadeDuration
+      endFadeDuration: endFadeDuration,
+      direction: direction
     )
   }
 

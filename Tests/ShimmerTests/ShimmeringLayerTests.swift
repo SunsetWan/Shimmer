@@ -57,10 +57,20 @@ final class ShimmeringLayerTests: XCTestCase {
 
     layer.start()
     let firstMask = layer.contentLayer.mask
+    let firstAnimationBeginTime = firstMask?
+      .animationKeys()?
+      .compactMap { firstMask?.animation(forKey: $0) }
+      .first?
+      .beginTime
     layer.start()
 
     XCTAssertTrue(layer.contentLayer.mask === firstMask)
-    XCTAssertEqual(layer.contentLayer.mask?.animationKeys()?.count, 1)
+    let repeatedAnimationBeginTime = layer.contentLayer.mask?
+      .animationKeys()?
+      .compactMap { layer.contentLayer.mask?.animation(forKey: $0) }
+      .first?
+      .beginTime
+    XCTAssertEqual(repeatedAnimationBeginTime, firstAnimationBeginTime)
 
     layer.stop(.immediate)
     layer.stop(.immediate)
