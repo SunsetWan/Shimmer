@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - swift-6
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 16.4
+        run: sudo xcode-select --switch /Applications/Xcode_16.4.app
+
+      - name: Test
+        run: >-
+          xcodebuild
+          -scheme Shimmer
+          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5'
+          test
+
+      - name: Build Debug
+        run: >-
+          xcodebuild
+          -scheme Shimmer
+          -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          build
+
+      - name: Build Release
+        run: >-
+          xcodebuild
+          -scheme Shimmer
+          -configuration Release
+          -destination 'generic/platform=iOS Simulator'
+          build

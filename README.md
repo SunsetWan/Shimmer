@@ -1,48 +1,110 @@
 # Shimmer
-Shimmer is an easy way to add a shimmering effect to any view in your app. It's useful as an unobtrusive loading indicator.
 
-Shimmer was originally developed to show loading status in [Paper](http://facebook.com/paper).
+Shimmer adds a Core Animation loading effect to UIKit views and layers. Version 2 is a Swift 6 package for iOS 13 and later.
 
-![Shimmer](https://github.com/facebook/Shimmer/blob/master/shimmer.gif?raw=true)
-
-## Usage
-To use Shimmer, create a `FBShimmeringView` or `FBShimmeringLayer` and add your content. To start shimmering, set the `shimmering` property to `YES`.
-
-An example of making a label shimmer:
-
-```objective-c
-FBShimmeringView *shimmeringView = [[FBShimmeringView alloc] initWithFrame:self.view.bounds];
-[self.view addSubview:shimmeringView];
-
-UILabel *loadingLabel = [[UILabel alloc] initWithFrame:shimmeringView.bounds];
-loadingLabel.textAlignment = NSTextAlignmentCenter;
-loadingLabel.text = NSLocalizedString(@"Shimmer", nil);
-shimmeringView.contentView = loadingLabel;
-
-// Start shimmering.
-shimmeringView.shimmering = YES;
-```
-
-There's also an example project. In the example, you can swipe horizontally and vertically to try various shimmering parameters, or tap to start or stop shimmering. (To build the example locally, you'll need to open `FBShimmering.xcworkpace` rather than the `.xcodeproj`.)
+![Shimmer](shimmer.gif)
 
 ## Installation
-There are two options:
 
- 1. Shimmer is available as `Shimmer` in [Cocoapods](http://cocoapods.org).
- 2. Manually add the files into your Xcode project. Slightly simpler, but updates are also manual.
+Add `https://github.com/SunsetWan/Shimmer` as a Swift Package dependency and select the `Shimmer` product. To pin the first v2 release in `Package.swift`:
 
-Shimmer requires iOS 6 or later.
+```swift
+.package(
+  url: "https://github.com/SunsetWan/Shimmer",
+  exact: "2.0.0"
+)
+```
 
-## How it works
-Shimmer uses the `-[CALayer mask]` property to enable shimmering, similar to what's described in John Harper's 2009 WWDC talk (unfortunately no longer online). Shimmer uses CoreAnimation's timing features to smoothly transition "on-beat" when starting and stopping the shimmer.
+Then import the module:
 
-## Other Platforms
+```swift
+import Shimmer
+```
 
-We have a version of Shimmer for Android, too! It's [also available on GitHub](https://github.com/facebook/shimmer-android).
+## ShimmeringView
 
-## Contributing
-See the CONTRIBUTING file for how to help out.
+`ShimmeringView` owns a `contentView`. Add placeholder subviews to that content view, then start the effect:
+
+```swift
+let shimmerView = ShimmeringView(frame: view.bounds)
+view.addSubview(shimmerView)
+
+let placeholder = UIView(frame: shimmerView.bounds)
+placeholder.backgroundColor = .secondarySystemBackground
+shimmerView.contentView.addSubview(placeholder)
+
+shimmerView.start()
+```
+
+The view pauses its underlying animation when it leaves a window while preserving `isShimmering`. Reattaching it resumes from its original timeline. An immediate stop prevents later reattachment from restarting it.
+
+## ShimmeringLayer
+
+`ShimmeringLayer` owns a `contentLayer`. Add layer content there and let the caller decide when visibility changes require `start(at:)` or `stop(_:)`:
+
+```swift
+let shimmerLayer = ShimmeringLayer()
+shimmerLayer.frame = hostLayer.bounds
+hostLayer.addSublayer(shimmerLayer)
+shimmerLayer.contentLayer.addSublayer(placeholderLayer)
+shimmerLayer.start()
+```
+
+Both hosts expose `configuration`, `isShimmering`, `start(at:)`, and `stop(_:)`. They keep their content host stable while managing only its mask.
+
+## Configuration
+
+Use `.default` or construct a validated configuration:
+
+```swift
+shimmerView.configuration = try ShimmerConfiguration(
+  speed: 230,
+  pauseDuration: 0.4,
+  highlightLength: 1,
+  baseOpacity: 1,
+  animationOpacity: 0.5,
+  beginFadeDuration: 0.1,
+  endFadeDuration: 0.3,
+  direction: .leftToRight
+)
+```
+
+Directions are physical: `.leftToRight`, `.rightToLeft`, `.topToBottom`, and `.bottomToTop`. Invalid numeric values throw `ShimmerConfigurationError`.
+
+## Shared timelines
+
+Reuse one opaque start time to keep independent hosts in phase:
+
+```swift
+let startTime = ShimmerStartTime.now
+firstShimmer.start(at: startTime)
+secondShimmer.start(at: startTime)
+```
+
+The package preserves that timeline through zero-sized starts, bounds changes, and `ShimmeringView` remounts without exposing raw Core Animation timing values.
+
+## Stopping
+
+```swift
+shimmerView.stop(.smooth)
+shimmerView.stop(.immediate)
+```
+
+- `.smooth` finishes the current sweep and end fade before removing the mask.
+- `.immediate` synchronously removes all shimmer resources.
+
+Repeated starts and stops are idempotent.
+
+## Migrating from v1
+
+Version 2 is a breaking Swift-only release:
+
+- Replace `FBShimmeringView` and `FBShimmeringLayer` with `ShimmeringView` and `ShimmeringLayer`.
+- Replace the `shimmering` Boolean property with `start(at:)` and `stop(_:)`.
+- Configure the effect with `ShimmerConfiguration` instead of Objective-C properties.
+- Integrate with Swift Package Manager. CocoaPods, copied-source, Objective-C, and binary compatibility are not provided.
+- The minimum deployment target is iOS 13, and clients compile the package in Swift 6 language mode.
 
 ## License
-Shimmer is BSD-licensed. 
 
+Shimmer is available under the BSD license in [LICENSE](LICENSE).
